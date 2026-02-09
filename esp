@@ -1,621 +1,578 @@
--- gamesense ESP + RMB Aimbot (2026 Enhanced Edition)
--- Optimized with better performance, organization, and features
+-- Arsenal ESP + Visible Aimbot (2026 Edition) - Rayfield UI
+-- No silent aim | Smooth mouse movement aimbot | Prediction | Team checks
 
-local LibraryURL = "https://raw.githubusercontent.com/focat69/gamesense/refs/heads/main/source"
-local Library = loadstring(game:HttpGetAsync(LibraryURL .. "?t=" .. tick()))()
-local Window = Library:New({ Name = "gamesense | ESP & Aimbot", Padding = 8 })
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Arsenal Hub 2026",
+   LoadingTitle = "Arsenal Features",
+   LoadingSubtitle = "ESP + Aimbot",
+   ConfigurationSaving = {
+      Enabled = false,
+      FolderName = nil,
+      FileName = "ArsenalHub"
+   }
+})
 
 -- Services
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UIS = game:GetService("UserInputService")
-local WS = game:GetService("Workspace")
-local LP = Players.LocalPlayer
-local Cam = WS.CurrentCamera
-local Mouse = LP:GetMouse()
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local UserInput      = game:GetService("UserInputService")
+local Workspace      = game:GetService("Workspace")
+local LocalPlayer    = Players.LocalPlayer
+local Camera         = Workspace.CurrentCamera
 
--- Character handling
-local Char, HRP
-local function UpdateCharacter()
-    Char = LP.Character
-    if Char then
-        HRP = Char:WaitForChild("HumanoidRootPart", 5)
-    end
+-- Character reference
+local Character, RootPart
+local function RefreshChar()
+   Character = LocalPlayer.Character
+   if Character then
+      RootPart = Character:WaitForChild("HumanoidRootPart", 8)
+   end
 end
+LocalPlayer.CharacterAdded:Connect(RefreshChar)
+RefreshChar()
 
-LP.CharacterAdded:Connect(function(newChar)
-    Char = newChar
-    HRP = newChar:WaitForChild("HumanoidRootPart", 8)
-end)
-UpdateCharacter()
-
--- Settings
+-- Settings table
 local Settings = {
-    ESP_Enabled = false,
-    tracers = false,
-    healthbar = false,
-    headdot = false,
-    skeleton = false,
-    chams = false,
-    cornerbox = false,
-    rainbow = false,
-    teamcheck = true,
-    visiblecheck = false,
-    distlimit = 1500,
-    fovcircle = true,
-    fovsize = 180,
-    smoothness = 0.08,
-    targetpart = "Head",
-    aimbot = false,
-    aimkey = Enum.UserInputType.MouseButton2,
-    espupdate_rate = 0, -- 0 = every frame, higher = less frequent
+   ESP_Enabled      = false,
+   Tracers          = false,
+   HealthBar        = false,
+   HeadDot          = false,
+   Skeleton         = false,
+   Chams            = false,
+   CornerBox        = false,
+   Rainbow          = false,
+   ESP_TeamCheck    = true,
+   VisibleCheck     = false,
+   MaxDistance      = 3000,
+
+   Aimbot           = false,
+   Aimbot_TeamCheck = true,
+   FOV_Circle       = true,
+   FOV_Size         = 240,
+   Smoothness       = 0.11,
+   Prediction       = 0.138,
+   AimPart          = "Head"
 }
 
--- Storage and connections
-local ESP_Storage = {}
+-- Storage
+local ESP_Objects = {}
 local Connections = {}
-local lastESPUpdate = 0
 
 -- FOV Circle
-local FOV_Circle = Drawing.new("Circle")
-FOV_Circle.Thickness = 1
-FOV_Circle.NumSides = 64
-FOV_Circle.Radius = Settings.fovsize
-FOV_Circle.Filled = false
-FOV_Circle.Transparency = 0.9
-FOV_Circle.Color = Color3.fromRGB(50, 255, 120)
-FOV_Circle.Visible = false
+local FOV = Drawing.new("Circle")
+FOV.Thickness   = 1.6
+FOV.NumSides    = 100
+FOV.Radius      = Settings.FOV_Size
+FOV.Filled      = false
+FOV.Transparency= 0.75
+FOV.Color       = Color3.fromRGB(255, 60, 60)
+FOV.Visible     = false
 
--- Rainbow color generator
-local function GetRainbowColor()
-    if not Settings.rainbow then return nil end
-    local hue = (tick() * 0.5) % 1
-    return Color3.fromHSV(hue, 0.8, 1)
+-- ────────────────────────────────────────────────
+--  UTILITY FUNCTIONS
+-- ────────────────────────────────────────────────
+
+local function GetRainbow()
+   if not Settings.Rainbow then return nil end
+   return Color3.fromHSV(tick() % 10 / 10, 0.9, 1)
 end
 
--- Color utilities
-local function GetHealthColor(health, maxHealth)
-    local percentage = maxHealth > 0 and health / maxHealth or 0
-    return Color3.fromHSV(percentage * 0.33, 0.9, 0.9)
+local function GetHealthColor(h, mh)
+   local p = mh > 0 and h/mh or 0
+   return Color3.fromHSV(p * 0.33, 1, 1)
 end
 
-local function GetTeamColor(plr, isVisible)
-    if Settings.teamcheck and plr.Team == LP.Team then
-        return Color3.fromRGB(80, 120, 255)
-    end
-    
-    if not isVisible and Settings.visiblecheck then
-        return Color3.fromRGB(100, 100, 100)
-    end
-    
-    return Color3.fromRGB(255, 80, 80)
+local function GetESPColor(player, visible)
+   local rainbow = GetRainbow()
+   if rainbow then return rainbow end
+   
+   if Settings.ESP_TeamCheck and player.Team == LocalPlayer.Team then
+      return Color3.fromRGB(100, 180, 255)
+   end
+   
+   if not visible and Settings.VisibleCheck then
+      return Color3.fromRGB(130, 130, 130)
+   end
+   
+   return Color3.fromRGB(255, 70, 70)
 end
 
--- ESP Creation
-local function NewESP(plr)
-    if plr == LP or ESP_Storage[plr] then return end
+-- ────────────────────────────────────────────────
+--  ESP CREATION
+-- ────────────────────────────────────────────────
 
-    local drawings = {
-        Box = Drawing.new("Square"),
-        Tracer = Drawing.new("Line"),
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        HealthOuter = Drawing.new("Line"),
-        HealthInner = Drawing.new("Line"),
-        HeadDot = Drawing.new("Circle"),
-    }
-    
-    -- Skeleton connections
-    local skeletonConnections = {
-        {"Head", "UpperTorso"},
-        {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "LeftUpperArm"},
-        {"LeftUpperArm", "LeftLowerArm"},
-        {"LeftLowerArm", "LeftHand"},
-        {"UpperTorso", "RightUpperArm"},
-        {"RightUpperArm", "RightLowerArm"},
-        {"RightLowerArm", "RightHand"},
-        {"LowerTorso", "LeftUpperLeg"},
-        {"LeftUpperLeg", "LeftLowerLeg"},
-        {"LeftLowerLeg", "LeftFoot"},
-        {"LowerTorso", "RightUpperLeg"},
-        {"RightUpperLeg", "RightLowerLeg"},
-        {"RightLowerLeg", "RightFoot"},
-    }
-    
-    for i, _ in ipairs(skeletonConnections) do
-        drawings["Skel_" .. i] = Drawing.new("Line")
-    end
+local function CreateESP(player)
+   if player == LocalPlayer or ESP_Objects[player] then return end
 
-    -- Box setup
-    local b = drawings.Box
-    b.Thickness = 1
-    b.Filled = false
-    b.Transparency = 1
-    b.ZIndex = 2
-    b.Visible = false
+   local drawings = {
+      Box       = Drawing.new("Square"),
+      Tracer    = Drawing.new("Line"),
+      Name      = Drawing.new("Text"),
+      Distance  = Drawing.new("Text"),
+      HealthOut = Drawing.new("Line"),
+      HealthIn  = Drawing.new("Line"),
+      HeadDot   = Drawing.new("Circle"),
+   }
 
-    -- Tracer
-    local t = drawings.Tracer
-    t.Thickness = 1
-    t.Transparency = 0.7
-    t.ZIndex = 1
-    t.Visible = false
+   local skeletonLines = {}
+   local skeletonParts = {
+      {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+      {"UpperTorso", "LeftUpperArm"},  {"LeftUpperArm", "LeftLowerArm"},  {"LeftLowerArm", "LeftHand"},
+      {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+      {"LowerTorso", "LeftUpperLeg"},  {"LeftUpperLeg", "LeftLowerLeg"},  {"LeftLowerLeg", "LeftFoot"},
+      {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+   }
 
-    -- Texts
-    local n = drawings.Name
-    n.Size = 14
-    n.Center = true
-    n.Outline = true
-    n.OutlineColor = Color3.new(0, 0, 0)
-    n.ZIndex = 3
-    n.Visible = false
-    
-    local d = drawings.Distance
-    d.Size = 12
-    d.Center = true
-    d.Outline = true
-    d.OutlineColor = Color3.new(0, 0, 0)
-    d.ZIndex = 3
-    d.Visible = false
+   for i = 1, #skeletonParts do
+      skeletonLines[i] = Drawing.new("Line")
+   end
 
-    -- Health bars
-    local ho = drawings.HealthOuter
-    ho.Thickness = 3
-    ho.Color = Color3.new(0, 0, 0)
-    ho.Transparency = 1
-    ho.ZIndex = 2
-    ho.Visible = false
-    
-    local hi = drawings.HealthInner
-    hi.Thickness = 1
-    hi.Transparency = 1
-    hi.ZIndex = 3
-    hi.Visible = false
+   -- Box
+   drawings.Box.Thickness    = 1.4
+   drawings.Box.Filled       = false
+   drawings.Box.Transparency = 1
+   drawings.Box.Visible      = false
 
-    -- Head dot
-    local hd = drawings.HeadDot
-    hd.Radius = 4
-    hd.NumSides = 12
-    hd.Filled = true
-    hd.Transparency = 1
-    hd.ZIndex = 3
-    hd.Visible = false
+   -- Tracer
+   drawings.Tracer.Thickness    = 1.3
+   drawings.Tracer.Transparency = 0.65
+   drawings.Tracer.Visible      = false
 
-    -- Skeleton lines
-    for i = 1, #skeletonConnections do
-        local line = drawings["Skel_" .. i]
-        line.Thickness = 1.5
-        line.Transparency = 0.9
-        line.ZIndex = 1
-        line.Visible = false
-    end
+   -- Name & Distance
+   drawings.Name.Size    = 14
+   drawings.Name.Center  = true
+   drawings.Name.Outline = true
+   drawings.Name.Visible = false
 
-    -- Chams (Highlight)
-    local highlight = Instance.new("Highlight")
-    highlight.Enabled = false
-    highlight.FillColor = Color3.fromRGB(255, 80, 80)
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Adornee = nil
+   drawings.Distance.Size    = 12
+   drawings.Distance.Center  = true
+   drawings.Distance.Outline = true
+   drawings.Distance.Visible = false
 
-    ESP_Storage[plr] = {
-        drawings = drawings,
-        highlight = highlight,
-        skeletonConnections = skeletonConnections
-    }
+   -- Health
+   drawings.HealthOut.Thickness    = 3
+   drawings.HealthOut.Color        = Color3.new(0,0,0)
+   drawings.HealthOut.Transparency = 1
+   drawings.HealthOut.Visible      = false
+
+   drawings.HealthIn.Thickness    = 1.8
+   drawings.HealthIn.Transparency = 1
+   drawings.HealthIn.Visible      = false
+
+   -- Head dot
+   drawings.HeadDot.Radius      = 4
+   drawings.HeadDot.NumSides    = 16
+   drawings.HeadDot.Filled      = true
+   drawings.HeadDot.Transparency= 1
+   drawings.HeadDot.Visible     = false
+
+   -- Skeleton
+   for _, line in ipairs(skeletonLines) do
+      line.Thickness    = 1.6
+      line.Transparency = 0.8
+      line.Visible      = false
+   end
+
+   -- Highlight (Chams)
+   local highlight = Instance.new("Highlight")
+   highlight.Enabled           = false
+   highlight.FillTransparency  = 0.45
+   highlight.OutlineTransparency = 0
+   highlight.DepthMode         = Enum.HighlightDepthMode.AlwaysOnTop
+
+   ESP_Objects[player] = {
+      Drawings = drawings,
+      Skeleton = skeletonLines,
+      Parts    = skeletonParts,
+      Highlight= highlight
+   }
 end
 
--- ESP Removal
-local function RemoveESP(plr)
-    local data = ESP_Storage[plr]
-    if not data then return end
-    
-    for _, drawing in pairs(data.drawings) do
-        if drawing and drawing.Remove then
-            drawing:Remove()
-        end
-    end
-    
-    if data.highlight then
-        data.highlight:Destroy()
-    end
-    
-    ESP_Storage[plr] = nil
+local function RemoveESP(player)
+   local data = ESP_Objects[player]
+   if not data then return end
+
+   for _, obj in pairs(data.Drawings) do
+      pcall(function() obj:Remove() end)
+   end
+
+   for _, line in ipairs(data.Skeleton) do
+      pcall(function() line:Remove() end)
+   end
+
+   if data.Highlight then
+      data.Highlight:Destroy()
+   end
+
+   ESP_Objects[player] = nil
 end
 
--- Corner Box Drawing
-local function DrawCornerBox(pos, width, height, thickness, color, drawings)
-    local corners = {
-        -- Top left
-        {from = pos, to = pos + Vector2.new(width * 0.3, 0)},
-        {from = pos, to = pos + Vector2.new(0, height * 0.3)},
-        -- Top right
-        {from = pos + Vector2.new(width, 0), to = pos + Vector2.new(width - width * 0.3, 0)},
-        {from = pos + Vector2.new(width, 0), to = pos + Vector2.new(width, height * 0.3)},
-        -- Bottom left
-        {from = pos + Vector2.new(0, height), to = pos + Vector2.new(width * 0.3, height)},
-        {from = pos + Vector2.new(0, height), to = pos + Vector2.new(0, height - height * 0.3)},
-        -- Bottom right
-        {from = pos + Vector2.new(width, height), to = pos + Vector2.new(width - width * 0.3, height)},
-        {from = pos + Vector2.new(width, height), to = pos + Vector2.new(width, height - height * 0.3)}
-    }
-    
-    -- Use existing drawings or create temporary ones
-    for i = 1, 8 do
-        local line = drawings["Corner_" .. i] or Drawing.new("Line")
-        line.Thickness = thickness
-        line.Color = color
-        line.From = corners[i].from
-        line.To = corners[i].to
-        line.Visible = true
-        drawings["Corner_" .. i] = line
-    end
+-- ────────────────────────────────────────────────
+--  ESP UPDATE LOOP
+-- ────────────────────────────────────────────────
+
+local function UpdateESP()
+   if not Settings.ESP_Enabled or not RootPart then return end
+
+   local screenCenter = Camera.ViewportSize / 2
+   local rainbow      = GetRainbow()
+
+   for player, data in pairs(ESP_Objects) do
+      local char   = player.Character
+      if not char then
+         for _, d in pairs(data.Drawings) do d.Visible = false end
+         for _, l in ipairs(data.Skeleton) do l.Visible = false end
+         data.Highlight.Enabled = false
+         continue
+      end
+
+      local root = char:FindFirstChild("HumanoidRootPart")
+      local hum  = char:FindFirstChild("Humanoid")
+      local head = char:FindFirstChild("Head")
+
+      if not (root and hum and head and hum.Health > 0) then
+         for _, d in pairs(data.Drawings) do d.Visible = false end
+         for _, l in ipairs(data.Skeleton) do l.Visible = false end
+         data.Highlight.Enabled = false
+         continue
+      end
+
+      local distance = (RootPart.Position - root.Position).Magnitude
+      if distance > Settings.MaxDistance then
+         for _, d in pairs(data.Drawings) do d.Visible = false end
+         for _, l in ipairs(data.Skeleton) do l.Visible = false end
+         data.Highlight.Enabled = false
+         continue
+      end
+
+      local _, onScreen = Camera:WorldToViewportPoint(root.Position)
+      if not onScreen then
+         for _, d in pairs(data.Drawings) do d.Visible = false end
+         for _, l in ipairs(data.Skeleton) do l.Visible = false end
+         data.Highlight.Enabled = false
+         continue
+      end
+
+      -- Visibility check
+      local visible = true
+      if Settings.VisibleCheck then
+         local params = RaycastParams.new()
+         params.FilterDescendantsInstances = {Character}
+         params.FilterType = Enum.RaycastFilterType.Exclude
+         local result = Workspace:Raycast(Camera.CFrame.Position, (root.Position - Camera.CFrame.Position), params)
+         visible = result and result.Instance:IsDescendantOf(char) or false
+      end
+
+      local color = rainbow or GetESPColor(player, visible)
+
+      -- Box sizing
+      local top    = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+      local bottom = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.8, 0))
+      local height = math.abs(top.Y - bottom.Y)
+      local width  = height * 0.48
+
+      local pos = Vector2.new(top.X - width/2, top.Y)
+
+      -- Box / Corner logic simplified (using box for now - add corner later if wanted)
+      data.Drawings.Box.Size      = Vector2.new(width, height)
+      data.Drawings.Box.Position  = pos
+      data.Drawings.Box.Color     = color
+      data.Drawings.Box.Visible   = true   -- always show box when enabled (toggle corner later)
+
+      -- Name
+      data.Drawings.Name.Text     = player.Name
+      data.Drawings.Name.Position = Vector2.new(pos.X + width/2, pos.Y - 18)
+      data.Drawings.Name.Color    = color
+      data.Drawings.Name.Visible  = true
+
+      -- Distance
+      data.Drawings.Distance.Text     = tostring(math.floor(distance)).." studs"
+      data.Drawings.Distance.Position = Vector2.new(pos.X + width/2, pos.Y + height + 4)
+      data.Drawings.Distance.Color    = color
+      data.Drawings.Distance.Visible  = true
+
+      -- Tracer
+      data.Drawings.Tracer.From   = screenCenter
+      data.Drawings.Tracer.To     = Vector2.new(pos.X + width/2, pos.Y + height)
+      data.Drawings.Tracer.Color  = color
+      data.Drawings.Tracer.Visible= Settings.Tracers
+
+      -- Health bar
+      if Settings.HealthBar then
+         local hpPercent = hum.Health / hum.MaxHealth
+         local barH      = height * hpPercent
+
+         data.Drawings.HealthOut.From = Vector2.new(pos.X - 5, pos.Y)
+         data.Drawings.HealthOut.To   = Vector2.new(pos.X - 5, pos.Y + height)
+         data.Drawings.HealthOut.Visible = true
+
+         data.Drawings.HealthIn.From  = Vector2.new(pos.X - 5, pos.Y + height - barH)
+         data.Drawings.HealthIn.To    = Vector2.new(pos.X - 5, pos.Y + height)
+         data.Drawings.HealthIn.Color = GetHealthColor(hum.Health, hum.MaxHealth)
+         data.Drawings.HealthIn.Visible = true
+      else
+         data.Drawings.HealthOut.Visible = false
+         data.Drawings.HealthIn.Visible  = false
+      end
+
+      -- Head dot
+      local hdPos, _ = Camera:WorldToViewportPoint(head.Position)
+      data.Drawings.HeadDot.Position = Vector2.new(hdPos.X, hdPos.Y)
+      data.Drawings.HeadDot.Color    = color
+      data.Drawings.HeadDot.Visible  = Settings.HeadDot
+
+      -- Skeleton
+      if Settings.Skeleton then
+         for i, pair in ipairs(data.Parts) do
+            local p1 = char:FindFirstChild(pair[1])
+            local p2 = char:FindFirstChild(pair[2])
+            if p1 and p2 then
+               local pos1, v1 = Camera:WorldToViewportPoint(p1.Position)
+               local pos2, v2 = Camera:WorldToViewportPoint(p2.Position)
+               if v1 and v2 then
+                  local ln = data.Skeleton[i]
+                  ln.From   = Vector2.new(pos1.X, pos1.Y)
+                  ln.To     = Vector2.new(pos2.X, pos2.Y)
+                  ln.Color  = color
+                  ln.Visible= true
+               else
+                  data.Skeleton[i].Visible = false
+               end
+            else
+               data.Skeleton[i].Visible = false
+            end
+         end
+      else
+         for _, ln in ipairs(data.Skeleton) do ln.Visible = false end
+      end
+
+      -- Chams
+      data.Highlight.Adornee    = char
+      data.Highlight.FillColor  = color
+      data.Highlight.OutlineColor = color:Lerp(Color3.new(1,1,1), 0.4)
+      data.Highlight.Enabled    = Settings.Chams
+   end
 end
 
--- ESP Update
-local function UpdateAllESP()
-    if not Settings.ESP_Enabled or not HRP then return end
-    
-    local currentTime = tick()
-    if Settings.espupdate_rate > 0 and currentTime - lastESPUpdate < Settings.espupdate_rate then
-        return
-    end
-    lastESPUpdate = currentTime
-    
-    local screenCenter = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
-    local rainbowCol = GetRainbowColor()
+-- ────────────────────────────────────────────────
+--  AIMBOT
+-- ────────────────────────────────────────────────
 
-    for plr, data in pairs(ESP_Storage) do
-        local char = plr.Character
-        if not char then 
-            for _, drawing in pairs(data.drawings) do
-                drawing.Visible = false
-            end
-            data.highlight.Enabled = false
-            continue 
-        end
+local IsAiming = false
 
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChild("Humanoid")
-        local head = char:FindFirstChild("Head")
-
-        if not (root and hum and head and hum.Health > 0) then
-            for _, drawing in pairs(data.drawings) do
-                drawing.Visible = false
-            end
-            data.highlight.Enabled = false
-            continue
-        end
-
-        local dist = (HRP.Position - root.Position).Magnitude
-        if dist > Settings.distlimit then
-            for _, drawing in pairs(data.drawings) do
-                drawing.Visible = false
-            end
-            data.highlight.Enabled = false
-            continue
-        end
-
-        local rootPos, onScreen = Cam:WorldToViewportPoint(root.Position)
-        if not onScreen then
-            for _, drawing in pairs(data.drawings) do
-                drawing.Visible = false
-            end
-            data.highlight.Enabled = false
-            continue
-        end
-
-        -- Visibility check
-        local isVisible = true
-        if Settings.visiblecheck then
-            local raycastParams = RaycastParams.new()
-            raycastParams.FilterDescendantsInstances = {Char}
-            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-            local rayResult = WS:Raycast(Cam.CFrame.Position, (root.Position - Cam.CFrame.Position).Unit * dist, raycastParams)
-            isVisible = rayResult and rayResult.Instance:IsDescendantOf(char) or false
-        end
-
-        local color = rainbowCol or GetTeamColor(plr, isVisible)
-        
-        -- Calculate box dimensions
-        local top = Cam:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0))
-        local bottom = Cam:WorldToViewportPoint(root.Position - Vector3.new(0, 4, 0))
-        local height = math.abs(top.Y - bottom.Y)
-        local width = height * 0.55
-        local position = Vector2.new(top.X - width / 2, top.Y)
-
-        -- Update drawings
-        local drawings = data.drawings
-        
-        -- Box / Corner Box
-        if Settings.cornerbox then
-            drawings.Box.Visible = false
-            DrawCornerBox(position, width, height, 2, color, drawings)
-        else
-            -- Hide corner lines if they exist
-            for i = 1, 8 do
-                if drawings["Corner_" .. i] then
-                    drawings["Corner_" .. i].Visible = false
-                end
-            end
-            
-            drawings.Box.Size = Vector2.new(width, height)
-            drawings.Box.Position = position
-            drawings.Box.Color = color
-            drawings.Box.Visible = true
-        end
-
-        -- Name
-        drawings.Name.Text = plr.Name
-        drawings.Name.Position = Vector2.new(position.X + width / 2, position.Y - 20)
-        drawings.Name.Color = color
-        drawings.Name.Visible = true
-
-        -- Distance
-        drawings.Distance.Text = string.format("%d studs", math.floor(dist))
-        drawings.Distance.Position = Vector2.new(position.X + width / 2, position.Y + height + 4)
-        drawings.Distance.Color = color
-        drawings.Distance.Visible = true
-
-        -- Tracer
-        drawings.Tracer.From = screenCenter
-        drawings.Tracer.To = Vector2.new(position.X + width / 2, position.Y + height)
-        drawings.Tracer.Color = color
-        drawings.Tracer.Visible = Settings.tracers
-
-        -- Health Bar
-        if Settings.healthbar then
-            local healthPercentage = hum.MaxHealth > 0 and (hum.Health / hum.MaxHealth) or 0
-            local healthBarHeight = height * healthPercentage
-            
-            drawings.HealthOuter.From = Vector2.new(position.X - 6, position.Y)
-            drawings.HealthOuter.To = Vector2.new(position.X - 6, position.Y + height)
-            drawings.HealthOuter.Visible = true
-            
-            drawings.HealthInner.From = Vector2.new(position.X - 6, position.Y + height - healthBarHeight)
-            drawings.HealthInner.To = Vector2.new(position.X - 6, position.Y + height)
-            drawings.HealthInner.Color = GetHealthColor(hum.Health, hum.MaxHealth)
-            drawings.HealthInner.Visible = true
-        else
-            drawings.HealthOuter.Visible = false
-            drawings.HealthInner.Visible = false
-        end
-
-        -- Head Dot
-        local headPos = Cam:WorldToViewportPoint(head.Position)
-        drawings.HeadDot.Position = Vector2.new(headPos.X, headPos.Y)
-        drawings.HeadDot.Color = color
-        drawings.HeadDot.Visible = Settings.headdot
-
-        -- Skeleton
-        if Settings.skeleton then
-            for i, connection in ipairs(data.skeletonConnections) do
-                local part1 = char:FindFirstChild(connection[1])
-                local part2 = char:FindFirstChild(connection[2])
-                
-                if part1 and part2 then
-                    local pos1, visible1 = Cam:WorldToViewportPoint(part1.Position)
-                    local pos2, visible2 = Cam:WorldToViewportPoint(part2.Position)
-                    
-                    if visible1 and visible2 then
-                        local line = drawings["Skel_" .. i]
-                        line.From = Vector2.new(pos1.X, pos1.Y)
-                        line.To = Vector2.new(pos2.X, pos2.Y)
-                        line.Color = color
-                        line.Visible = true
-                    else
-                        drawings["Skel_" .. i].Visible = false
-                    end
-                else
-                    drawings["Skel_" .. i].Visible = false
-                end
-            end
-        else
-            for i = 1, #data.skeletonConnections do
-                drawings["Skel_" .. i].Visible = false
-            end
-        end
-
-        -- Chams
-        data.highlight.Adornee = char
-        data.highlight.FillColor = color
-        data.highlight.OutlineColor = Color3.new(color.R * 0.5, color.G * 0.5, color.B * 0.5)
-        data.highlight.Enabled = Settings.chams
-    end
-end
-
--- Aimbot System
-local Aiming = false
-UIS.InputBegan:Connect(function(input)
-    if input.UserInputType == Settings.aimkey then
-        Aiming = true
-    end
+UserInput.InputBegan:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseButton2 then
+      IsAiming = true
+   end
 end)
 
-UIS.InputEnded:Connect(function(input)
-    if input.UserInputType == Settings.aimkey then
-        Aiming = false
-    end
+UserInput.InputEnded:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseButton2 then
+      IsAiming = false
+   end
 end)
 
-local function GetClosestTarget()
-    local center = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
-    local bestTarget, bestDistance = nil, Settings.fovsize
+local function GetBestTarget()
+   local center     = Camera.ViewportSize / 2
+   local closest    = nil
+   local bestDist   = Settings.FOV_Size
 
-    for _, player in Players:GetPlayers() do
-        if player == LP then continue end
-        if Settings.teamcheck and player.Team == LP.Team then continue end
-        
-        local character = player.Character
-        if not character then continue end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        
-        local targetPart = character:FindFirstChild(Settings.targetpart)
-        if not targetPart then continue end
-        
-        local screenPosition, onScreen = Cam:WorldToViewportPoint(targetPart.Position)
-        if not onScreen then continue end
-        
-        local screenPos = Vector2.new(screenPosition.X, screenPosition.Y)
-        local distance = (screenPos - center).Magnitude
-        
-        if distance < bestDistance then
-            bestDistance = distance
-            bestTarget = targetPart
-        end
-    end
-    
-    return bestTarget
+   for _, plr in ipairs(Players:GetPlayers()) do
+      if plr == LocalPlayer then continue end
+      if Settings.Aimbot_TeamCheck and plr.Team == LocalPlayer.Team then continue end
+
+      local char = plr.Character
+      if not char then continue end
+
+      local hum = char:FindFirstChild("Humanoid")
+      if not hum or hum.Health <= 0 then continue end
+
+      local part = char:FindFirstChild(Settings.AimPart)
+      if not part then continue end
+
+      local predPos = part.Position + (part.AssemblyLinearVelocity * Settings.Prediction)
+      local screen, visible = Camera:WorldToViewportPoint(predPos)
+
+      if not visible then continue end
+
+      local dist = (Vector2.new(screen.X, screen.Y) - center).Magnitude
+      if dist < bestDist then
+         bestDist = dist
+         closest  = part
+      end
+   end
+
+   return closest
 end
 
-local function AimAtTarget()
-    if not Settings.aimbot or not Aiming then return end
-    
-    local target = GetClosestTarget()
-    if not target then return end
-    
-    local targetPosition = target.Position
-    local screenPosition, onScreen = Cam:WorldToViewportPoint(targetPosition)
-    
-    if not onScreen then return end
-    
-    local center = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
-    local delta = Vector2.new(screenPosition.X, screenPosition.Y) - center
-    
-    -- Apply smoothing
-    local smoothedDelta = delta * (1 - Settings.smoothness)
-    
-    -- Move mouse
-    mousemoverel(smoothedDelta.X, smoothedDelta.Y)
+local function RunAimbot()
+   if not Settings.Aimbot or not IsAiming then return end
+
+   local target = GetBestTarget()
+   if not target then return end
+
+   local predPos = target.Position + (target.AssemblyLinearVelocity * Settings.Prediction)
+   local screenPos, onScreen = Camera:WorldToViewportPoint(predPos)
+
+   if not onScreen then return end
+
+   local center = Camera.ViewportSize / 2
+   local delta  = Vector2.new(screenPos.X, screenPos.Y) - center
+   local move   = delta * (1 - Settings.Smoothness)
+
+   mousemoverel(move.X, move.Y)
 end
 
--- Main loop
-Connections.MainLoop = RunService.RenderStepped:Connect(function()
-    pcall(function()
-        -- Update FOV circle
-        FOV_Circle.Position = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
-        FOV_Circle.Radius = Settings.fovsize
-        FOV_Circle.Visible = Settings.fovcircle and Settings.aimbot
-        
-        -- Update ESP
-        UpdateAllESP()
-        
-        -- Run aimbot
-        AimAtTarget()
-    end)
+-- ────────────────────────────────────────────────
+--  MAIN LOOP
+-- ────────────────────────────────────────────────
+
+Connections.Render = RunService.RenderStepped:Connect(function()
+   pcall(function()
+      FOV.Position = Camera.ViewportSize / 2
+      FOV.Radius   = Settings.FOV_Size
+      FOV.Visible  = Settings.FOV_Circle and Settings.Aimbot
+
+      if Settings.ESP_Enabled then
+         UpdateESP()
+      end
+
+      RunAimbot()
+   end)
 end)
 
--- Cleanup function
-local function Cleanup()
-    for _, connection in pairs(Connections) do
-        connection:Disconnect()
-    end
-    
-    FOV_Circle:Remove()
-    
-    for plr, _ in pairs(ESP_Storage) do
-        RemoveESP(plr)
-    end
-    
-    ESP_Storage = {}
-    Connections = {}
-end
+-- ────────────────────────────────────────────────
+--  UI - RAYFIELD
+-- ────────────────────────────────────────────────
 
--- UI Setup
-local ESPTab = Window:CreateTab({Name = "ESP"})
-local AimTab = Window:CreateTab({Name = "Aimbot"})
-local SettingsTab = Window:CreateTab({Name = "Settings"})
+local TabESP = Window:CreateTab("ESP", 4483362458)
+local TabAim = Window:CreateTab("Aimbot", 4483345998)
+local TabSet = Window:CreateTab("Settings", 4483345998)
 
 -- ESP Tab
-ESPTab:Toggle({Name = "ESP Enabled", State = false, Callback = function(state)
-    Settings.ESP_Enabled = state
-    
-    if state then
-        -- Create ESP for existing players
-        for _, player in Players:GetPlayers() do
-            NewESP(player)
-        end
-        
-        -- Connect player added event
-        Connections.PlayerAdded = Players.PlayerAdded:Connect(function(player)
-            NewESP(player)
-        end)
-        
-        -- Connect player removing event
-        Connections.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
-            RemoveESP(player)
-        end)
-    else
-        -- Cleanup connections and ESP
-        if Connections.PlayerAdded then
-            Connections.PlayerAdded:Disconnect()
-        end
-        if Connections.PlayerRemoving then
-            Connections.PlayerRemoving:Disconnect()
-        end
-        
-        for plr, _ in pairs(ESP_Storage) do
-            RemoveESP(plr)
-        end
-        ESP_Storage = {}
-    end
-end})
+TabESP:CreateToggle({
+   Name = "ESP Enabled",
+   CurrentValue = false,
+   Callback = function(v)
+      Settings.ESP_Enabled = v
+      if v then
+         for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then CreateESP(p) end
+         end
+      else
+         for p,_ in pairs(ESP_Objects) do RemoveESP(p) end
+      end
+   end
+})
 
-ESPTab:Toggle({Name = "Tracers", State = false, Callback = function(state) Settings.tracers = state end})
-ESPTab:Toggle({Name = "Health Bar", State = false, Callback = function(state) Settings.healthbar = state end})
-ESPTab:Toggle({Name = "Head Dot", State = false, Callback = function(state) Settings.headdot = state end})
-ESPTab:Toggle({Name = "Skeleton ESP", State = false, Callback = function(state) Settings.skeleton = state end})
-ESPTab:Toggle({Name = "Chams (Highlight)", State = false, Callback = function(state) Settings.chams = state end})
-ESPTab:Toggle({Name = "Corner Box", State = false, Callback = function(state) Settings.cornerbox = state end})
-ESPTab:Toggle({Name = "Rainbow Mode", State = false, Callback = function(state) Settings.rainbow = state end})
-ESPTab:Toggle({Name = "Team Check", State = true, Callback = function(state) Settings.teamcheck = state end})
-ESPTab:Toggle({Name = "Visible Only", State = false, Callback = function(state) Settings.visiblecheck = state end})
-
-ESPTab:Slider({Name = "Max Distance", Min = 100, Max = 10000, Default = 1500, Callback = function(value)
-    Settings.distlimit = value
-end})
+TabESP:CreateToggle({Name = "Tracers",     CurrentValue = false, Callback = function(v) Settings.Tracers = v     end})
+TabESP:CreateToggle({Name = "Health Bar",  CurrentValue = false, Callback = function(v) Settings.HealthBar = v  end})
+TabESP:CreateToggle({Name = "Head Dot",    CurrentValue = false, Callback = function(v) Settings.HeadDot = v    end})
+TabESP:CreateToggle({Name = "Skeleton",    CurrentValue = false, Callback = function(v) Settings.Skeleton = v   end})
+TabESP:CreateToggle({Name = "Chams",       CurrentValue = false, Callback = function(v) Settings.Chams = v      end})
+TabESP:CreateToggle({Name = "Rainbow",     CurrentValue = false, Callback = function(v) Settings.Rainbow = v    end})
+TabESP:CreateToggle({Name = "Team Check",  CurrentValue = true,  Callback = function(v) Settings.ESP_TeamCheck = v end})
+TabESP:CreateSlider({
+   Name = "Max Distance",
+   Range = {500, 5000},
+   Increment = 100,
+   Suffix = "studs",
+   CurrentValue = 3000,
+   Callback = function(v) Settings.MaxDistance = v end
+})
 
 -- Aimbot Tab
-AimTab:Toggle({Name = "Aimbot (Hold RMB)", State = false, Callback = function(state) Settings.aimbot = state end})
-AimTab:Toggle({Name = "Draw FOV Circle", State = true, Callback = function(state) Settings.fovcircle = state end})
-AimTab:Slider({Name = "FOV Size", Min = 25, Max = 1000, Default = 180, Callback = function(value)
-    Settings.fovsize = value
-end})
-AimTab:Slider({Name = "Smoothness", Min = 0.01, Max = 0.5, Default = 0.08, Step = 0.01, Callback = function(value)
-    Settings.smoothness = value
-end})
-AimTab:Dropdown({Name = "Aim Part", Items = {"Head", "HumanoidRootPart", "UpperTorso"}, Default = "Head", Callback = function(value)
-    Settings.targetpart = value
-end})
+TabAim:CreateToggle({
+   Name = "Aimbot (Hold RMB)",
+   CurrentValue = false,
+   Callback = function(v) Settings.Aimbot = v end
+})
+
+TabAim:CreateToggle({
+   Name = "Team Check (Aimbot)",
+   CurrentValue = true,
+   Callback = function(v) Settings.Aimbot_TeamCheck = v end
+})
+
+TabAim:CreateToggle({
+   Name = "Show FOV Circle",
+   CurrentValue = true,
+   Callback = function(v) Settings.FOV_Circle = v end
+})
+
+TabAim:CreateSlider({
+   Name = "FOV Size",
+   Range = {80, 600},
+   Increment = 5,
+   Suffix = "",
+   CurrentValue = 240,
+   Callback = function(v) Settings.FOV_Size = v end
+})
+
+TabAim:CreateSlider({
+   Name = "Smoothness",
+   Range = {0.01, 0.4},
+   Increment = 0.01,
+   Suffix = "",
+   CurrentValue = 0.11,
+   Callback = function(v) Settings.Smoothness = v end
+})
+
+TabAim:CreateSlider({
+   Name = "Prediction",
+   Range = {0.05, 0.22},
+   Increment = 0.001,
+   Suffix = "",
+   CurrentValue = 0.138,
+   Callback = function(v) Settings.Prediction = v end
+})
+
+TabAim:CreateDropdown({
+   Name = "Aim Part",
+   Options = {"Head", "UpperTorso", "HumanoidRootPart"},
+   CurrentOption = "Head",
+   Callback = function(v) Settings.AimPart = v end
+})
 
 -- Settings Tab
-SettingsTab:Button({Name = "Cleanup ESP", Callback = function()
-    for plr, _ in pairs(ESP_Storage) do
-        RemoveESP(plr)
-    end
-    ESP_Storage = {}
-    Library:Notify({Description = "ESP cleaned up", Duration = 3})
-end})
+TabSet:CreateButton({
+   Name = "Unload / Cleanup",
+   Callback = function()
+      for _, conn in pairs(Connections) do
+         pcall(function() conn:Disconnect() end)
+      end
+      FOV:Remove()
+      for p,_ in pairs(ESP_Objects) do RemoveESP(p) end
+      Rayfield:Notify({
+         Title = "Unloaded",
+         Content = "Script cleaned up.",
+         Duration = 4
+      })
+   end
+})
 
-SettingsTab:Button({Name = "Refresh Character", Callback = function()
-    UpdateCharacter()
-    Library:Notify({Description = "Character reference refreshed", Duration = 3})
-end})
+-- Player join/leave
+Players.PlayerAdded:Connect(function(p)
+   if Settings.ESP_Enabled and p ~= LocalPlayer then
+      CreateESP(p)
+   end
+end)
 
--- Initialization
-for _, player in Players:GetPlayers() do
-    if player ~= LP then
-        NewESP(player)
-    end
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-- Initial ESP
+if Settings.ESP_Enabled then
+   for _, p in ipairs(Players:GetPlayers()) do
+      if p ~= LocalPlayer then CreateESP(p) end
+   end
 end
 
--- Game cleanup
-game:GetService("Unloading"):Connect(Cleanup)
+Rayfield:Notify({
+   Title = "Arsenal Hub 2026 Loaded",
+   Content = "Hold RMB to aim • Prediction active • Enjoy!",
+   Duration = 6.5
+})
 
-Library:Notify({Description = "Enhanced ESP & Aimbot loaded | Hold RMB to aim | No prediction", Duration = 6})
-print("Enhanced gamesense loaded - Better performance, more features")
+print("Arsenal Hub 2026 • Rayfield UI • Visible Aimbot + ESP")
